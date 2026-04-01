@@ -1,14 +1,22 @@
 set -x
 
-# DAPO (overlong reward shaping): Qwen3-4B on GSM8K
+# DAPO (overlong reward shaping + dynamic sampling): Qwen3-4B on GSM8K
 # Hardware: 8x GTX 3090 (24GB VRAM each)
 # verl version: v0.6.1
 # Reward manager: my_dapo (NaiveRewardManager + R_length overlong penalty)
 #
+# DAPO components enabled:
+#   [Task 1] Overlong Reward Shaping: linear penalty for responses in (L_max-L_cache, L_max]
+#   [Task 2] Dynamic Sampling: filter trivial groups (all-correct / all-wrong) before advantage
+#
 # Overlong penalty params:
-#   max_resp_len=2048      L_max: matches data.max_response_length
+#   max_resp_len=2048         L_max: matches data.max_response_length
 #   overlong_buffer_len=1024  L_cache: linear penalty zone [1024, 2048]
 #   overlong_penalty_factor=1.0  factor=1 reproduces exact DAPO paper formula
+#
+# Dynamic sampling params:
+#   filter_groups.enable=True   enable group filtering
+#   filter_groups.metric=acc    use raw correctness signal (not penalized reward)
 
 gsm8k_train_path=$HOME/data/gsm8k/train.parquet
 gsm8k_test_path=$HOME/data/gsm8k/test.parquet
@@ -44,6 +52,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
+    algorithm.filter_groups.enable=True \
+    algorithm.filter_groups.metric=acc \
     reward_model.reward_manager=my_dapo \
     reward_model.reward_kwargs.max_resp_len=2048 \
     reward_model.reward_kwargs.overlong_buffer_len=1024 \

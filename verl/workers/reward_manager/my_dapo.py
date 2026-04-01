@@ -71,6 +71,23 @@ class MyDAPORewardManager(NaiveRewardManager):
             reward_tensor = base_result
             reward_extra_info = defaultdict(list)
 
+        # Step 1.5: ensure "acc" is present in reward_extra_info.
+        # NaiveRewardManager only populates reward_extra_info when compute_score returns a dict.
+        # When compute_score returns a plain float (e.g. GSM8K math), reward_extra_info is empty.
+        # We extract the base scores from reward_tensor here (before overlong penalty is applied)
+        # so that filter_trivial_groups in ray_trainer has a clean, unmodified correctness signal.
+        if "acc" not in reward_extra_info:
+            for i in range(len(data)):
+                data_item = data[i]
+                response_length = data_item.batch["responses"].shape[-1]
+                response_mask = data_item.batch["attention_mask"][-response_length:]
+                valid_response_length = int(response_mask.sum())
+                if valid_response_length > 0:
+                    base_score = float(reward_tensor[i, valid_response_length - 1].item())
+                else:
+                    base_score = 0.0
+                reward_extra_info["acc"].append(base_score)
+
         # Step 2: apply overlong penalty per sample
         L_max = self.max_resp_len
         L_cache = self.overlong_buffer_len

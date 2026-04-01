@@ -178,6 +178,61 @@ def compute_response_mask(data: DataProto):
     return attention_mask[:, -response_length:]
 
 
+def filter_trivial_groups(batch: DataProto, metric: str) -> tuple[DataProto, dict]:
+    """Filter out trivial groups where all responses are correct or all are wrong.
+
+    In GRPO-style training, each prompt generates n responses forming a group.
+    Groups where every response is correct (group_mean == 1) or every response is wrong
+    (group_mean == 0) carry no learning signal: GRPO advantage would be zero for all-same
+    groups after within-group normalization, and they can cause NaN when std == 0.
+    This function removes such groups before advantage computation.
+
+    Args:
+        batch: DataProto with non_tensor_batch["uid"] and non_tensor_batch[metric].
+               uid identifies which prompt a response belongs to (same uid = same group).
+        metric: Key in non_tensor_batch to use for filtering, e.g. "acc".
+
+    Returns:
+        filtered_batch: DataProto with trivial groups removed.
+        filter_metrics: Dict of filter statistics for logging.
+    """
+    uids = batch.non_tensor_batch["uid"]  # shape (N,), N = n_prompts * n_responses
+    scores = batch.non_tensor_batch[metric].astype(float)  # shape (N,)
+
+    # Group indices by uid
+    uid_to_indices = defaultdict(list)
+    for i, uid in enumerate(uids):
+        uid_to_indices[uid].append(i)
+
+    keep_mask = np.zeros(len(uids), dtype=bool)
+    total_groups = len(uid_to_indices)
+    kept_groups = 0
+
+    for uid, indices in uid_to_indices.items():
+        group_mean = scores[indices].mean()
+        if 0.0 < group_mean < 1.0:  # mixed correct/wrong → has learning signal
+            keep_mask[indices] = True
+            kept_groups += 1
+
+    filtered_groups = total_groups - kept_groups
+    filter_metrics = {
+        "filter_groups/total": total_groups,
+        "filter_groups/kept": kept_groups,
+        "filter_groups/filtered": filtered_groups,
+        "filter_groups/filter_ratio": filtered_groups / total_groups if total_groups > 0 else 0.0,
+    }
+
+    if kept_groups == 0:
+        # Edge case: all groups are trivial. Keep everything to avoid empty batch.
+        print(
+            f"[filter_trivial_groups] Warning: all {total_groups} groups are trivial "
+            f"(all-correct or all-wrong). Skipping filter to avoid empty batch."
+        )
+        return batch, filter_metrics
+
+    return batch[keep_mask], filter_metrics
+
+
 def compute_advantage(
     data: DataProto,
     adv_estimator: AdvantageEstimator,
@@ -1184,6 +1239,19 @@ class RayPPOTrainer:
                             batch, is_metrics = compute_rollout_correction_and_add_to_batch(batch, rollout_corr_config)
                             # IS and off-policy metrics already have rollout_corr/ prefix
                             metrics.update(is_metrics)
+
+                        # DAPO Dynamic Sampling: filter trivial groups before advantage computation.
+                        # A "trivial group" is a set of responses for the same prompt where all
+                        # responses are correct (acc==1) or all are wrong (acc==0). Such groups
+                        # have zero GRPO advantage after within-group normalization (or cause NaN
+                        # when std==0), so removing them before compute_advantage keeps the
+                        # gradient signal clean.
+                        filter_cfg = self.config.algorithm.get("filter_groups", None)
+                        if filter_cfg is not None and filter_cfg.enable:
+                            metric = filter_cfg.metric
+                            if metric in batch.non_tensor_batch:
+                                batch, filter_metrics = filter_trivial_groups(batch, metric)
+                                metrics.update(filter_metrics)
 
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get(
