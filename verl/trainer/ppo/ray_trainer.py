@@ -1253,6 +1253,14 @@ class RayPPOTrainer:
                                 batch, filter_metrics = filter_trivial_groups(batch, metric)
                                 metrics.update(filter_metrics)
 
+                                # After filtering, batch size may not be divisible by dp_size,
+                                # causing unequal chunk errors in update_actor. Truncate whole
+                                # groups from the tail to restore divisibility.
+                                dp_size = self.actor_rollout_wg.world_size
+                                remainder = len(batch) % dp_size
+                                if remainder != 0:
+                                    batch = batch[: len(batch) - remainder]
+
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get(
                             "norm_adv_by_std_in_grpo", True
