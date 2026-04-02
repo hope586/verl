@@ -8,6 +8,7 @@ set -x
 # DAPO components enabled:
 #   [Task 1] Overlong Reward Shaping: linear penalty for responses in (L_max-L_cache, L_max]
 #   [Task 2] Dynamic Sampling: filter trivial groups (all-correct / all-wrong) before advantage
+#   [Task 3] Clip-Higher: asymmetric PPO clip [1-clip_ratio_low, 1+clip_ratio_high]
 #
 # Overlong penalty params:
 #   max_resp_len=2048         L_max: matches data.max_response_length
@@ -17,6 +18,11 @@ set -x
 # Dynamic sampling params:
 #   filter_groups.enable=True   enable group filtering
 #   filter_groups.metric=acc    use raw correctness signal (not penalized reward)
+#
+# Clip-Higher params:
+#   clip_ratio_low=0.2    lower bound: ratio >= 1-0.2=0.8 (same as standard PPO)
+#   clip_ratio_high=0.28  upper bound: ratio <= 1+0.28=1.28 (relaxed from 1.2)
+#                         encourages exploration on positive-advantage tokens
 
 gsm8k_train_path=$HOME/data/gsm8k/train.parquet
 gsm8k_test_path=$HOME/data/gsm8k/test.parquet
@@ -37,6 +43,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.clip_ratio_low=0.2 \
+    actor_rollout_ref.actor.clip_ratio_high=0.28 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
