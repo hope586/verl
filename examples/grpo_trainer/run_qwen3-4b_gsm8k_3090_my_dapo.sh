@@ -10,6 +10,7 @@ set -x
 #   [Task 2] Dynamic Sampling: filter trivial groups (all-correct / all-wrong) before advantage
 #   [Task 3] Clip-Higher: asymmetric PPO clip [1-clip_ratio_low, 1+clip_ratio_high]
 #   [Task 4] Remove KL Constraints: both KL paths disabled (DAPO paper §3.4)
+#   [Task 5] Token-level Loss: loss_agg_mode=token-mean (DAPO paper §3.1)
 #             Path A (in-reward):  algorithm.use_kl_in_reward=False  (already default)
 #             Path B (loss term):  actor.use_kl_loss=False           (set explicitly)
 #             Stability is maintained by Clip-Higher + Overlong Shaping instead of KL
@@ -50,6 +51,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.clip_ratio_low=0.2 \
     actor_rollout_ref.actor.clip_ratio_high=0.28 \
     actor_rollout_ref.actor.use_kl_loss=False \
+    actor_rollout_ref.actor.loss_agg_mode=token-mean \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
