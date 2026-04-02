@@ -67,9 +67,9 @@ python3 -m verl.trainer.main_ppo \
     algorithm.filter_groups.enable=True \
     algorithm.filter_groups.metric=acc \
     reward_model.reward_manager=my_dapo \
-    reward_model.reward_kwargs.max_resp_len=2048 \
-    reward_model.reward_kwargs.overlong_buffer_len=1024 \
-    reward_model.reward_kwargs.overlong_penalty_factor=1.0 \
+    +reward_model.reward_kwargs.max_resp_len=2048 \
+    +reward_model.reward_kwargs.overlong_buffer_len=1024 \
+    +reward_model.reward_kwargs.overlong_penalty_factor=1.0 \
     trainer.critic_warmup=0 \
     trainer.logger='["console"]' \
     trainer.project_name='grpo_gsm8k_3090' \
