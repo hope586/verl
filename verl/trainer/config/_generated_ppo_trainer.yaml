@@ -492,6 +492,10 @@ algorithm:
   pf_ppo:
     reweight_method: pow
     weight_pow: 2.0
+  filter_groups:
+    enable: false
+    metric: null
+    max_num_gen_batches: 0
 custom_reward_function:
   path: null
   name: compute_score
