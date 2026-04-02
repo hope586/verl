@@ -116,6 +116,18 @@ algorithm:
     # Power used for weight scaling in "pow" method
     weight_pow: 2.0
 
+  # Filter trivial groups (used in DAPO dynamic sampling)
+  filter_groups:
+
+    # Whether to enable group filtering
+    enable: False
+
+    # Metric to filter on: "acc", "score", "seq_reward", etc.
+    metric: null
+
+    # Max number of generation batches (0 = no limit)
+    max_num_gen_batches: 0
+
 # config for the trainer
 trainer:
 
