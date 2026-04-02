@@ -9,6 +9,10 @@ set -x
 #   [Task 1] Overlong Reward Shaping: linear penalty for responses in (L_max-L_cache, L_max]
 #   [Task 2] Dynamic Sampling: filter trivial groups (all-correct / all-wrong) before advantage
 #   [Task 3] Clip-Higher: asymmetric PPO clip [1-clip_ratio_low, 1+clip_ratio_high]
+#   [Task 4] Remove KL Constraints: both KL paths disabled (DAPO paper §3.4)
+#             Path A (in-reward):  algorithm.use_kl_in_reward=False  (already default)
+#             Path B (loss term):  actor.use_kl_loss=False           (set explicitly)
+#             Stability is maintained by Clip-Higher + Overlong Shaping instead of KL
 #
 # Overlong penalty params:
 #   max_resp_len=2048         L_max: matches data.max_response_length
@@ -45,9 +49,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.actor.clip_ratio_low=0.2 \
     actor_rollout_ref.actor.clip_ratio_high=0.28 \
-    actor_rollout_ref.actor.use_kl_loss=True \
-    actor_rollout_ref.actor.kl_loss_coef=0.001 \
-    actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+    actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
