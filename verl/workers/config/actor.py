@@ -49,6 +49,12 @@ class PolicyLossConfig(BaseConfig):
     clip_cov_ub: float = 5.0
     kl_cov_ratio: float = 0.0002
     ppo_kl_coef: float = 0.1
+    # MHPO hyperparameters (https://arxiv.org/abs/2603.16929)
+    mhpo_c: float = 1.5           # LFM bound: ψ(r) ∈ (-c, c), gradient upper bound e^c
+    mhpo_k_pos: float = 1.5       # Weibull shape for positive shifts (r > 1)
+    mhpo_lambda_pos: float = 1.0  # Weibull scale for positive shifts
+    mhpo_k_neg: float = 2.0       # Weibull shape for negative shifts (r < 1), stricter
+    mhpo_lambda_neg: float = 0.8  # Weibull scale for negative shifts, earlier onset
 
 
 @dataclass

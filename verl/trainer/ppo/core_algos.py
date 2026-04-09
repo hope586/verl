@@ -1350,6 +1350,90 @@ def compute_policy_loss_geo_mean(
     return pg_loss, pg_metrics
 
 
+@register_policy_loss("mhpo")
+def compute_policy_loss_mhpo(
+    old_log_prob: torch.Tensor,
+    log_prob: torch.Tensor,
+    advantages: torch.Tensor,
+    response_mask: torch.Tensor,
+    loss_agg_mode: str = "token-mean",
+    config: Optional[DictConfig | ActorConfig] = None,
+    rollout_is_weights: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """
+    Modulated Hazard-aware Policy Optimization (MHPO).
+
+    Replaces PPO/GRPO's hard clip+min with a fully differentiable objective:
+
+        L = -E[ exp(ψ(r) - sg[ζ(r)]) · Â ]
+
+    where:
+        r   = exp(log_prob - old_log_prob)           importance ratio
+        ψ(r) = c · tanh(log(r) / c)                  Log-Fidelity Modulator (LFM)
+        ζ(r) = (softplus(sg(ψ)) / λ+)^k+             Decoupled Hazard Penalty (DHP)
+               + (softplus(-sg(ψ)) / λ-)^k-
+        sg[·] = stop-gradient
+
+    Key properties:
+        - LFM maps unbounded log-ratios into (-c, c); gradient multiplier bounded by e^c.
+        - DHP applies asymmetric Weibull penalties to positive (r>1) and negative (r<1) shifts.
+        - sg[] on ψ inside ζ ensures ζ only rescales magnitude, never distorts gradient direction.
+
+    Paper: https://arxiv.org/abs/2603.16929
+
+    Args:
+        old_log_prob: Log-probs under old policy, shape (batch_size, response_length).
+        log_prob: Log-probs under current policy, shape (batch_size, response_length).
+        advantages: Advantage estimates, shape (batch_size, response_length).
+        response_mask: Boolean mask for valid tokens, shape (batch_size, response_length).
+        loss_agg_mode: Token aggregation mode passed to agg_loss().
+        config: ActorConfig; reads mhpo_* fields from config.policy_loss.
+        rollout_is_weights: Optional IS correction weights, shape (batch_size, response_length).
+    """
+    assert config is not None
+    assert not isinstance(config, AlgoConfig)
+
+    c   = config.policy_loss.get("mhpo_c", 1.5)
+    kp  = config.policy_loss.get("mhpo_k_pos", 1.5)
+    lp  = config.policy_loss.get("mhpo_lambda_pos", 1.0)
+    km  = config.policy_loss.get("mhpo_k_neg", 2.0)
+    lm  = config.policy_loss.get("mhpo_lambda_neg", 0.8)
+
+    # log-ratio (computed in log-space for numerical stability; never materialise r directly)
+    log_r = torch.clamp(log_prob - old_log_prob, min=-20.0, max=20.0)
+
+    # LFM: ψ(r) = c · tanh(log(r) / c)  ∈ (-c, c)
+    # Near r=1: ψ ≈ log(r), gradient ≈ 1/r (recovers standard policy gradient)
+    # As |log r| → ∞: gradient gracefully vanishes (no hard boundary)
+    psi = c * torch.tanh(log_r / c)
+
+    # DHP: stop-gradient on ψ so ζ modulates magnitude only, not direction
+    psi_sg = psi.detach()
+    # softplus(ψ) ≈ ψ when r > 1 (positive shift dominates)
+    # softplus(-ψ) ≈ -ψ when r < 1 (negative shift dominates)
+    sp = torch.nn.functional.softplus(psi_sg)
+    sm = torch.nn.functional.softplus(-psi_sg)
+    zeta = (sp / lp) ** kp + (sm / lm) ** km  # ≥ 0 always; exp(-ζ) ∈ (0, 1]
+
+    # Token-level objective: exp(ψ - ζ) · Â
+    token_obj = torch.exp(psi - zeta) * advantages
+
+    if rollout_is_weights is not None:
+        token_obj = token_obj * rollout_is_weights
+
+    pg_loss = agg_loss(loss_mat=-token_obj, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+
+    # Metrics for monitoring
+    ppo_kl = verl_F.masked_mean(-log_r, response_mask)
+    pg_metrics = {
+        "actor/ppo_kl": ppo_kl.detach().item(),
+        "actor/mhpo_psi_mean": verl_F.masked_mean(psi, response_mask).detach().item(),
+        "actor/mhpo_zeta_mean": verl_F.masked_mean(zeta, response_mask).detach().item(),
+        "actor/mhpo_survival_weight": verl_F.masked_mean(torch.exp(-zeta), response_mask).detach().item(),
+    }
+    return pg_loss, pg_metrics
+
+
 def compute_entropy_loss(logits, response_mask, loss_agg_mode: str = "token-mean"):
     """Compute categorical entropy loss (For backward compatibility)
 
